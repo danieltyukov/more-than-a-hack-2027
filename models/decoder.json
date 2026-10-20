@@ -1,6 +1,6 @@
 {
  "decoder": {
-  "switch_ha": 4.0,
+  "switch_ha": 6.0,
   "switch_dead": 8.0,
   "switch_restarter": 1.0,
   "temper": 1.0
@@ -93,7 +93,7 @@
   "shape34",
   "shape35"
  ],
- "cv_spell_f1": null,
+ "cv_spell_f1": 0.5767361326472987,
  "matches": [
   "J03WMX",
   "J03WN1",

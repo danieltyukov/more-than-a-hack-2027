@@ -35,6 +35,32 @@ def _runs(mask):
     return list(zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)))
 
 
+def _dead_ball(ball, a, b, rng):
+    """A believable ball for the stoppage [a, b).
+
+    The DFL files freeze the ball for the whole stoppage, often past a line, and then jump it to
+    the restart spot on the restart frame. Nothing like that happens in the competition tracking,
+    and a model trained on it learns "a ball that does not move is dead" and "a ball that jumps is
+    a restart". So the frozen stretch is rebuilt: the ball rolls on from where it was when play
+    stopped, slowing down, and is then carried at walking pace to where play restarts.
+    """
+    m = b - a
+    start = ball[a - 1] if a > 0 else ball[a]
+    end = ball[b] if b < len(ball) else start
+    vel = (ball[a - 1] - ball[max(a - 6, 0)]) * (FPS / 5.0) if a > 5 else np.zeros(2)
+    if not (np.all(np.isfinite(start)) and np.all(np.isfinite(end))):
+        return np.full((m, 2), np.nan, dtype=np.float32)
+    vel = np.nan_to_num(vel)
+    roll = min(m, int(rng.uniform(0.3, 2.0) * FPS))
+    k = np.arange(roll)[:, None] / FPS
+    rolled = start + vel * k * np.clip(1.0 - k / (2.0 * max(roll, 1) / FPS), 0.0, 1.0)
+    stop = rolled[-1] if roll else start
+    rest = m - roll
+    w = (np.arange(1, rest + 1) / float(rest + 1))[:, None]
+    carried = stop + (end - stop) * w
+    return np.concatenate([rolled, carried]).astype(np.float32)
+
+
 def draw_params(rng):
     return {
         "player_sd": rng.uniform(0.1, 0.3),
@@ -70,14 +96,16 @@ def degrade(t, labels, rng, params=None):
             players[start:start + dur, j] = np.nan
 
     hidden = np.zeros(n, dtype=bool)
-    # stoppages: the ball is out of shot or in someone's hands for most of them
     dead = labels == 2
     for a, b in _runs(dead):
+        ball[a:b] = _dead_ball(ball, a, b, rng)
+        # the ball is out of shot or in someone's hands for most stoppages; when the tracker
+        # loses it is only loosely tied to the whistle, so the gap edges are jittered both ways
         if rng.random() < p["dead_hidden"]:
-            s = a + int(rng.uniform(0, 1.5) * FPS)
-            e = b - int(rng.uniform(0, 0.8) * FPS)
+            s = a + int(rng.uniform(-0.5, 2.5) * FPS)
+            e = b - int(rng.uniform(-0.5, 1.5) * FPS)
             if e > s:
-                hidden[s:e] = True
+                hidden[max(s, 0):min(e, n)] = True
     # live play: occlusions where the ball is crowded
     alive = (labels == 0) | (labels == 1)
     d = np.linalg.norm(t.players - t.ball[:, None, :], axis=2)
@@ -86,12 +114,12 @@ def degrade(t, labels, rng, params=None):
     if weight.sum() > 0:
         weight /= weight.sum()
         target = p["alive_hidden"] * alive.sum()
-        tries = 0
-        while (hidden & alive).sum() < target and tries < 2000:
-            s = rng.choice(n, p=weight)
-            dur = int(np.clip(rng.lognormal(np.log(5 * FPS), 0.5), 3 * FPS, 30 * FPS))
+        starts = rng.choice(n, size=2000, p=weight)
+        durs = np.clip(rng.lognormal(np.log(5 * FPS), 0.5, size=2000), 3 * FPS, 30 * FPS)
+        for s, dur in zip(starts, durs.astype(int)):
+            if (hidden & alive).sum() >= target:
+                break
             hidden[max(0, s - dur // 3):s + dur] = True
-            tries += 1
     # the provider bridges gaps shorter than ~3 s, so those stay visible
     for a, b in _runs(hidden):
         if b - a < 3 * FPS:

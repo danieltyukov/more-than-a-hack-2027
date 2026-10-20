@@ -74,12 +74,20 @@ def emissions(p_dead, p_home, p_restart, dead_offset=None, temper=1.0):
     return s * temper
 
 
-def decode(scores, blocks, params=None):
+def decode(scores, blocks, params=None, dead_before=None):
+    """dead_before: {half: frame} -- the ball is dead from the start of that half's block up to
+    the frame (the kickoff), whatever the scores say."""
     p = dict(DECODER, **(params or {}))
     cost = segment.cost_matrix(p["switch_ha"], p["switch_dead"], p["switch_restarter"])
     out = np.full(len(scores), -1, dtype=np.int8)
-    for _, first, last in blocks:
-        path = segment.viterbi(scores[first:last + 1] * p["temper"], cost)
+    for half, first, last in blocks:
+        block = scores[first:last + 1] * p["temper"]
+        kickoff = (dead_before or {}).get(half)
+        if kickoff is not None and kickoff > first:
+            block = block.copy()
+            block[:kickoff - first, segment.S_H] = -segment.NEVER
+            block[:kickoff - first, segment.S_A] = -segment.NEVER
+        path = segment.viterbi(block, cost)
         out[first:last + 1] = segment.STATE_LABEL[path]
     return out
 

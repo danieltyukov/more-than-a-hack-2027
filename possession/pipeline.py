@@ -86,7 +86,13 @@ def dead_offset(p_dead, shot, weights):
     return z
 
 
-def learned_label(t, shot=None, models=None, decoder=None, weights=None):
+# First live video frame of each half, as published in DATA.md and FAQ.md (and checked by
+# starter/load_smart_tagging.py). The first half is graded from its kickoff; the second is graded
+# from 110808 but kicks off at 113742, and the 2934 frames in between are all dead.
+KICKOFFS = {"BAR-ATH": {1: 11185, 2: 113742}}
+
+
+def learned_label(t, shot=None, models=None, decoder=None, weights=None, game=GAME):
     if models is None:
         models = learned.load()
     if decoder is None:
@@ -94,7 +100,7 @@ def learned_label(t, shot=None, models=None, decoder=None, weights=None):
     x, _ = framefeatures.compute(t, Features(t))
     p_dead, p_home, p_restart = learned.predict(models, x)
     scores = learned.emissions(p_dead, p_home, p_restart, dead_offset(p_dead, shot, weights))
-    return letters(learned.decode(scores, t.blocks, decoder))
+    return letters(learned.decode(scores, t.blocks, decoder, KICKOFFS.get(game)))
 
 
 def run(game=GAME, data_dir=None, use_broadcast=True):
