@@ -98,6 +98,10 @@ def learned_label(t, shot=None, models=None, decoder=None, weights=None, game=GA
     if decoder is None:
         decoder, weights = load_settings()
     x, _ = framefeatures.compute(t, Features(t))
+    expected = models["dead"].n_features_in_
+    if x.shape[1] != expected:
+        raise RuntimeError("the models in models/ expect {} features, framefeatures gives {}: "
+                           "retrain with scripts/train.py".format(expected, x.shape[1]))
     p_dead, p_home, p_restart = learned.predict(models, x)
     scores = learned.emissions(p_dead, p_home, p_restart, dead_offset(p_dead, shot, weights))
     return letters(learned.decode(scores, t.blocks, decoder, KICKOFFS.get(game)))

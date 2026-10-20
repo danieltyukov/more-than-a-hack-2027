@@ -22,6 +22,7 @@ from .atd import ROOT
 
 MODEL_DIR = os.path.join(ROOT, "models")
 EPS = 1e-4
+KICKOFF_LIVE = 25
 
 GBM = dict(max_iter=400, learning_rate=0.05, max_leaf_nodes=63, min_samples_leaf=200,
            l2_regularization=1.0, early_stopping=False)
@@ -75,20 +76,50 @@ def emissions(p_dead, p_home, p_restart, dead_offset=None, temper=1.0):
 
 
 def decode(scores, blocks, params=None, dead_before=None):
-    """dead_before: {half: frame} -- the ball is dead from the start of that half's block up to
-    the frame (the kickoff), whatever the scores say."""
+    """dead_before: {half: kickoff frame} -- the ball is dead from the start of that half's block
+    up to the kickoff and alive for the second after it, whatever the scores say."""
     p = dict(DECODER, **(params or {}))
     cost = segment.cost_matrix(p["switch_ha"], p["switch_dead"], p["switch_restarter"])
     out = np.full(len(scores), -1, dtype=np.int8)
     for half, first, last in blocks:
         block = scores[first:last + 1] * p["temper"]
         kickoff = (dead_before or {}).get(half)
-        if kickoff is not None and kickoff > first:
+        if kickoff is not None and first <= kickoff <= last:
+            k = kickoff - first
             block = block.copy()
-            block[:kickoff - first, segment.S_H] = -segment.NEVER
-            block[:kickoff - first, segment.S_A] = -segment.NEVER
+            block[:k, segment.S_H] = -segment.NEVER
+            block[:k, segment.S_A] = -segment.NEVER
+            # the kickoff puts the ball in play
+            block[k:k + KICKOFF_LIVE, segment.S_DH] = -segment.NEVER
+            block[k:k + KICKOFF_LIVE, segment.S_DA] = -segment.NEVER
         path = segment.viterbi(block, cost)
         out[first:last + 1] = segment.STATE_LABEL[path]
+    return out
+
+
+def shift_stoppages(states, blocks, onset_lead, restart_lead, fixed=None):
+    """Move every predicted stoppage earlier: its start by onset_lead frames, its end by
+    restart_lead. A stoppage never takes more than half of the play before it, so no possession
+    disappears, and one that would shrink below a second keeps its end. fixed: {half: frame},
+    stoppages ending there (the kickoff) keep their end.
+    """
+    out = states.copy()
+    for half, first, last in blocks:
+        seg = states[first:last + 1]
+        edges = np.flatnonzero(np.diff(seg) != 0) + 1
+        bounds = np.concatenate(([0], edges, [len(seg)]))
+        runs = [(first + bounds[i], first + bounds[i + 1], seg[bounds[i]])
+                for i in range(len(bounds) - 1)]
+        for i, (s, e, lab) in enumerate(runs):
+            if lab != segment.D:
+                continue
+            if i > 0 and runs[i - 1][2] != segment.D:
+                ps, pe, _ = runs[i - 1]
+                lead = min(onset_lead, (pe - ps) // 2)
+                out[s - lead:s] = segment.D
+            ends_at_kickoff = fixed and fixed.get(half) == e
+            if i + 1 < len(runs) and not ends_at_kickoff and e - s - restart_lead >= 25:
+                out[e - restart_lead:e] = runs[i + 1][2]
     return out
 
 
