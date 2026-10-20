@@ -26,10 +26,11 @@ EPS = 1e-4
 GBM = dict(max_iter=400, learning_rate=0.05, max_leaf_nodes=63, min_samples_leaf=200,
            l2_regularization=1.0, early_stopping=False)
 
+# chosen by leave-one-match-out spellF1 on the degraded DFL matches (scripts/train.py)
 DECODER = {
-    "switch_ha": 6.0,
-    "switch_dead": 6.0,
-    "switch_restarter": 3.0,
+    "switch_ha": 4.0,
+    "switch_dead": 8.0,
+    "switch_restarter": 1.0,
     "temper": 1.0,
 }
 

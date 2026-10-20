@@ -69,6 +69,8 @@ def score(labels, pred, blocks):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cv-only", action="store_true")
+    parser.add_argument("--skip-cv", action="store_true",
+                        help="train the final models with the decoder costs in learned.DECODER")
     parser.add_argument("--matches", nargs="*")
     args = parser.parse_args()
 
@@ -76,6 +78,10 @@ def main():
     t0 = time.time()
     data = {m: [build(m, seed=1000 * i + c) for c in range(COPIES)] for i, m in enumerate(matches)}
     print("features built for {} matches in {:.0f} s".format(len(matches), time.time() - t0))
+
+    if args.skip_cv:
+        finish(data, matches, dict(learned.DECODER), None)
+        return
 
     combos = [dict(zip(GRID, v)) for v in itertools.product(*GRID.values())]
     table = np.zeros((len(matches), len(combos), 4))
@@ -97,17 +103,19 @@ def main():
     for j in order[:8]:
         print("  spellF1 {:.3f}  macroF1 {:.3f}  poss ratio {:.2f}  {}".format(
             mean[j], table[:, j, 1].mean(), (table[:, j, 2] / table[:, j, 3]).mean(), combos[j]))
-    chosen = combos[int(order[0])]
-    if args.cv_only:
-        return
+    chosen = dict(learned.DECODER, **combos[int(order[0])])
+    if not args.cv_only:
+        finish(data, matches, chosen, float(mean[order[0]]))
 
+
+def finish(data, matches, decoder, cv_score):
     x, y = stack([p for m in matches for p in data[m]])
     models = learned.fit(x, y)
     learned.save(models)
     with open(os.path.join(learned.MODEL_DIR, "decoder.json"), "w") as handle:
-        json.dump({"decoder": chosen, "features": data[matches[0]][0]["names"],
-                   "cv_spell_f1": float(mean[order[0]]), "matches": matches}, handle, indent=1)
-    print("saved models and decoder costs {} to {}".format(chosen, learned.MODEL_DIR))
+        json.dump({"decoder": decoder, "features": data[matches[0]][0]["names"],
+                   "cv_spell_f1": cv_score, "matches": matches}, handle, indent=1)
+    print("saved models and decoder costs {} to {}".format(decoder, learned.MODEL_DIR))
 
 
 if __name__ == "__main__":

@@ -1,56 +1,106 @@
-"""Tracking in, one label per video frame out."""
+"""Tracking in, one label per video frame out.
+
+Two ways of scoring frames share the decoder:
+
+  learned   the DFL-trained classifiers in learned.py, plus the broadcast shot as extra dead-ball
+            evidence. This is what writes the submission.
+  rules     the hand-built touch and dead-ball scores (control.py, deadball.py). Kept as the
+            reference the learned version has to beat.
+"""
+
+import json
+import os
 
 import numpy as np
 
-from games import GAME, half_video_blocks
+from games import GAME
 
-from . import atd, broadcast, control, deadball, segment
+from . import atd, broadcast, control, deadball, framefeatures, learned, segment
 from .features import Features
+from .smooth import window_frac
 
-DEFAULTS = {
+RULE_DEFAULTS = {
     "touch_gain": 1.0,       # weight of one frame of touch evidence
-    "switch_ha": 6.0,        # price of a turnover
-    "switch_dead": 12.0,     # price of entering or leaving a stoppage
-    "dead_gain": 1.0,        # weight of the dead-ball log-odds
-    "restart_gain": 1.0,     # weight of "who is standing over the dead ball"
+    "switch_ha": 12.0,       # price of a turnover
+    "switch_dead": 25.0,     # price of entering or leaving a stoppage
+    "dead_gain": 2.0,        # weight of the dead-ball log-odds
+    "restart_gain": 2.0,     # weight of "who is standing over the dead ball"
     "switch_restarter": 4.0, # price of changing our mind about who restarts
-    "shape_gain": 0.0,       # weight of the team-shape log-odds on every frame
-    "shape_gain_noball": 0.0,  # extra weight where the ball position is unknown
 }
 
 
-def label(features, params=None, shot=None, shape_prob=None, game=GAME):
-    p = dict(DEFAULTS, **(params or {}))
-    n = features.n
-    e = control.evidence(features) * p["touch_gain"]
-    if shape_prob is not None:
-        q = np.clip(np.where(np.isfinite(shape_prob), shape_prob, 0.5), 0.02, 0.98)
-        gain = p["shape_gain"] + p["shape_gain_noball"] * (~features.ball_known)
-        e = e + gain * np.log(q / (1.0 - q))
-    dead = deadball.score(features, shot) * p["dead_gain"]
+def shot_features(shot):
+    return {"no_pitch": window_frac(shot == broadcast.NO_PITCH, 25),
+            "other_view": window_frac(shot == broadcast.OTHER_VIEW, 25)}
 
-    r = control.restart_evidence(features) * p["restart_gain"]
 
-    score = np.zeros((n, 4))
+def letters(states):
+    out = np.full(len(states), "X", dtype="<U1")
+    played = states >= 0
+    out[played] = segment.LETTERS[states[played]]
+    return out
+
+
+def rule_scores(f, params=None, shot=None):
+    p = dict(RULE_DEFAULTS, **(params or {}))
+    e = control.evidence(f) * p["touch_gain"]
+    dead = deadball.score(f, shot) * p["dead_gain"]
+    r = control.restart_evidence(f) * p["restart_gain"]
+    score = np.zeros((f.n, 4))
     score[:, segment.S_H] = e
     score[:, segment.S_A] = -e
     score[:, segment.S_DH] = dead + r
     score[:, segment.S_DA] = dead - r
+    return score
+
+
+def rule_label(f, blocks, params=None, shot=None):
+    p = dict(RULE_DEFAULTS, **(params or {}))
     cost = segment.cost_matrix(p["switch_ha"], p["switch_dead"], p["switch_restarter"])
+    score = rule_scores(f, p, shot)
+    states = np.full(f.n, -1, dtype=np.int8)
+    for _, first, last in blocks:
+        states[first:last + 1] = segment.STATE_LABEL[segment.viterbi(score[first:last + 1], cost)]
+    return letters(states)
 
-    out = np.full(n, "X", dtype="<U1")
-    for _, first, last in half_video_blocks(game):
-        path = segment.viterbi(score[first:last + 1], cost)
-        out[first:last + 1] = segment.LETTERS[segment.STATE_LABEL[path]]
-    return out
+
+def load_settings(folder=learned.MODEL_DIR):
+    with open(os.path.join(folder, "decoder.json")) as handle:
+        decoder = json.load(handle)["decoder"]
+    path = os.path.join(folder, "broadcast.json")
+    weights = None
+    if os.path.isfile(path):
+        with open(path) as handle:
+            weights = json.load(handle)
+    return decoder, weights
 
 
-def run(params=None, game=GAME, data_dir=None, use_broadcast=True):
-    tracking = atd.load(game, data_dir)
-    if not use_broadcast:
-        return label(Features(tracking), params, None, game)
-    b = broadcast.Broadcast(tracking, game, data_dir)
-    return label(Features(tracking, b.ball), params, b.shot, game)
+def dead_offset(p_dead, shot, weights):
+    """Turn the DFL dead-ball log-odds into the calibrated one with the broadcast added."""
+    if weights is None or shot is None:
+        return None
+    logit = np.log(p_dead) - np.log1p(-p_dead)
+    z = weights["intercept"] + (weights["model"] - 1.0) * logit
+    for name, value in shot_features(shot).items():
+        z = z + weights[name] * value
+    return z
+
+
+def learned_label(t, shot=None, models=None, decoder=None, weights=None):
+    if models is None:
+        models = learned.load()
+    if decoder is None:
+        decoder, weights = load_settings()
+    x, _ = framefeatures.compute(t, Features(t))
+    p_dead, p_home, p_restart = learned.predict(models, x)
+    scores = learned.emissions(p_dead, p_home, p_restart, dead_offset(p_dead, shot, weights))
+    return letters(learned.decode(scores, t.blocks, decoder))
+
+
+def run(game=GAME, data_dir=None, use_broadcast=True):
+    t = atd.load(game, data_dir)
+    shot = broadcast.Broadcast(t, game, data_dir).shot if use_broadcast else None
+    return learned_label(t, shot)
 
 
 def write_submission(path, labels):
