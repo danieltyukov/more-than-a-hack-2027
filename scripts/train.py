@@ -81,7 +81,11 @@ def main():
     parser.add_argument("--copies", type=int, default=COPIES,
                         help="degraded copies of each match (default %(default)s)")
     parser.add_argument("--models", default=learned.MODEL_DIR, help="where to write the models")
+    parser.add_argument("--gbm", default="", help="overrides for learned.GBM, e.g. max_iter=600")
     args = parser.parse_args()
+    for item in filter(None, args.gbm.split(",")):
+        key, value = item.split("=")
+        learned.GBM[key] = type(learned.GBM[key])(value)
 
     matches = args.matches or dfl.match_ids()
     t0 = time.time()

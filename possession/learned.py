@@ -56,6 +56,43 @@ def predict(models, x):
                  for k in ("dead", "team", "restart"))
 
 
+STACK_OFFSETS = (-50, -25, -12, -6, -3, 0, 3, 6, 12, 25, 50)
+
+
+def _shifted(x, k):
+    out = np.full_like(x, np.nan)
+    if k > 0:
+        out[:-k] = x[k:]
+    elif k < 0:
+        out[-k:] = x[:k]
+    else:
+        out[:] = x
+    return out
+
+
+def _side_mean(x, w, future):
+    if future:
+        return _side_mean(x[::-1], w, False)[::-1]
+    cs = np.concatenate(([0.0], np.cumsum(x)))
+    i = np.arange(len(x))
+    lo = np.maximum(0, i - w)
+    return (cs[i] - cs[lo]) / np.maximum(i - lo, 1)
+
+
+def stack_features(p_dead, p_home, p_restart):
+    """Second-stage inputs: the first-stage log-odds around each frame."""
+    cols = []
+    for p in (p_dead, p_home, p_restart):
+        logit = np.log(p) - np.log1p(-p)
+        cols += [_shifted(logit, k) for k in STACK_OFFSETS]
+        cols += [_side_mean(logit, w, f) for w in (12, 50) for f in (False, True)]
+    dead = np.log(p_dead) - np.log1p(-p_dead)
+    pad = np.pad(dead, 25, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(pad, 51)
+    cols += [windows.min(axis=1), windows.max(axis=1)]
+    return np.column_stack(cols).astype(np.float32)
+
+
 def emissions(p_dead, p_home, p_restart, dead_offset=None, temper=1.0):
     """(n, 4) log-scores for the hidden states of segment.py.
 
