@@ -14,13 +14,19 @@ DEFAULTS = {
     "dead_gain": 1.0,        # weight of the dead-ball log-odds
     "restart_gain": 1.0,     # weight of "who is standing over the dead ball"
     "switch_restarter": 4.0, # price of changing our mind about who restarts
+    "shape_gain": 0.0,       # weight of the team-shape log-odds on every frame
+    "shape_gain_noball": 0.0,  # extra weight where the ball position is unknown
 }
 
 
-def label(features, params=None, shot=None, game=GAME):
+def label(features, params=None, shot=None, shape_prob=None, game=GAME):
     p = dict(DEFAULTS, **(params or {}))
     n = features.n
     e = control.evidence(features) * p["touch_gain"]
+    if shape_prob is not None:
+        q = np.clip(np.where(np.isfinite(shape_prob), shape_prob, 0.5), 0.02, 0.98)
+        gain = p["shape_gain"] + p["shape_gain_noball"] * (~features.ball_known)
+        e = e + gain * np.log(q / (1.0 - q))
     dead = deadball.score(features, shot) * p["dead_gain"]
 
     r = control.restart_evidence(features) * p["restart_gain"]
@@ -41,8 +47,10 @@ def label(features, params=None, shot=None, game=GAME):
 
 def run(params=None, game=GAME, data_dir=None, use_broadcast=True):
     tracking = atd.load(game, data_dir)
-    shot = broadcast.Broadcast(tracking, game, data_dir).shot if use_broadcast else None
-    return label(Features(tracking), params, shot, game)
+    if not use_broadcast:
+        return label(Features(tracking), params, None, game)
+    b = broadcast.Broadcast(tracking, game, data_dir)
+    return label(Features(tracking, b.ball), params, b.shot, game)
 
 
 def write_submission(path, labels):

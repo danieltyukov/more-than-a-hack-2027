@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from games import GAME, GAMES, require, source_frames
+from games import GAME, GAMES, half_video_blocks, require, source_frames
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.environ.get("MTAH_CACHE_DIR") or os.path.join(ROOT, "cache")
@@ -30,15 +30,17 @@ class Tracking:
     ball     (n, 2)    float32, NaN where the ball is not seen
     ball_z   (n,)      float32, height in metres; only filled on ~5% of frames, mostly in the air
     team     (k,)      int8, HOME or AWAY per slot
+    blocks   [(half, first_frame, last_frame)] the frames that are played, half by half
     """
 
-    def __init__(self, players, speed, ball, ball_z, team, pitch):
+    def __init__(self, players, speed, ball, ball_z, team, pitch, blocks=None):
         self.players = players
         self.speed = speed
         self.ball = ball
         self.ball_z = ball_z
         self.team = team
         self.pitch = pitch
+        self.blocks = blocks
 
     @property
     def n(self):
@@ -97,4 +99,5 @@ def load(game=GAME, data_dir=None, source="tactical", use_cache=True):
     speed = raw[:, :-1, 2]
     ball = raw[:, -1, :2] * scale
     ball_z = raw[:, -1, 2]
-    return Tracking(players, speed, ball, ball_z, team, (length, width))
+    blocks = half_video_blocks(game) if source == "tactical" else None
+    return Tracking(players, speed, ball, ball_z, team, (length, width), blocks)

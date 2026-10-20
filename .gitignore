@@ -63,3 +63,4 @@ venv/
 env/
 .DS_Store
 cache/
+external/

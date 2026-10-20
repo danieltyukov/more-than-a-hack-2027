@@ -13,6 +13,7 @@ the first second after it.
 """
 
 import numpy as np
+from numba import njit
 
 H, A, D = 0, 1, 2
 LETTERS = np.array(["H", "A", "D"])
@@ -29,20 +30,32 @@ def viterbi(score, switch_cost):
     score        (n, k) log-score of each hidden state on each frame (higher is better)
     switch_cost  (k, k) price of moving from state i to state j, zero on the diagonal
 
-    Returns an int8 array of hidden states.
+    Returns an int8 array of hidden states. Ties go to staying in the current state.
     """
+    return _viterbi(np.ascontiguousarray(score, dtype=np.float64),
+                    np.ascontiguousarray(switch_cost, dtype=np.float64))
+
+
+@njit(cache=True)
+def _viterbi(score, cost):
     n, k = score.shape
     back = np.zeros((n, k), dtype=np.int8)
-    best = score[0].astype(np.float64).copy()
-    cost = np.asarray(switch_cost, dtype=np.float64)
-    cols = np.arange(k)
+    best = score[0].copy()
+    new = np.empty(k)
     for t in range(1, n):
-        cand = best[:, None] - cost              # cand[i, j]: come from i, arrive in j
-        prev = cand.argmax(axis=0)
-        best = cand[prev, cols] + score[t]
-        back[t] = prev
+        for j in range(k):
+            arg = j
+            val = best[j]                        # staying wins ties
+            for i in range(k):
+                c = best[i] - cost[i, j]
+                if c > val:
+                    val = c
+                    arg = i
+            new[j] = val + score[t, j]
+            back[t, j] = arg
+        best[:] = new
     path = np.empty(n, dtype=np.int8)
-    path[-1] = int(best.argmax())
+    path[n - 1] = np.argmax(best)
     for t in range(n - 1, 0, -1):
         path[t - 1] = back[t, path[t]]
     return path
