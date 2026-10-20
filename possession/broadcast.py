@@ -6,13 +6,13 @@ offset per half (the halftime break was cut differently), and replays and close-
 match anything. The offsets are found here by sliding the broadcast ball track along the tactical
 one, then checked frame by frame against the players.
 
-What the broadcast gives back:
+What the broadcast gives back is the shot: what the TV director is showing at each tactical
+frame. Directors cut to close-ups and replays when the ball is dead, so this is a dead-ball signal
+that owes nothing to the tracking at all.
 
-  shot     what the TV director is showing at each tactical frame. Directors cut to close-ups and
-           replays when the ball is dead, so this is a dead-ball signal that owes nothing to the
-           tracking at all.
-  ball     the broadcast camera's ball, on frames where the broadcast shows live play. It is
-           zoomed in on the action, so it sometimes sees the ball when the wide camera does not.
+(The broadcast ball was tried as well, to fill gaps in the tactical ball track. It covered about
+5,900 graded frames but added more false turnovers than it removed, mostly aerial balls that the
+two cameras put on different spots of the grass, so it is not used.)
 """
 
 import warnings
@@ -148,6 +148,3 @@ class Broadcast:
         self.shot = np.full(n, NO_BROADCAST, dtype=np.int8)
         self.shot[target[ok]] = np.where(live, LIVE, np.where(valid, OTHER_VIEW, NO_PITCH))[ok]
 
-        self.ball = np.full((n, 2), np.nan, dtype=np.float32)
-        use = ok & live & np.isfinite(bro.ball[:, 0])
-        self.ball[target[use]] = bro.ball[use]

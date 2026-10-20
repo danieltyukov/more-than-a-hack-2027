@@ -72,15 +72,19 @@ def main():
     parser.add_argument("--skip-cv", action="store_true",
                         help="train the final models with the decoder costs in learned.DECODER")
     parser.add_argument("--matches", nargs="*")
+    parser.add_argument("--copies", type=int, default=COPIES,
+                        help="degraded copies of each match (default %(default)s)")
+    parser.add_argument("--models", default=learned.MODEL_DIR, help="where to write the models")
     args = parser.parse_args()
 
     matches = args.matches or dfl.match_ids()
     t0 = time.time()
-    data = {m: [build(m, seed=1000 * i + c) for c in range(COPIES)] for i, m in enumerate(matches)}
+    data = {m: [build(m, seed=1000 * i + c) for c in range(args.copies)]
+            for i, m in enumerate(matches)}
     print("features built for {} matches in {:.0f} s".format(len(matches), time.time() - t0))
 
     if args.skip_cv:
-        finish(data, matches, dict(learned.DECODER), None)
+        finish(data, matches, dict(learned.DECODER), None, args.models)
         return
 
     combos = [dict(zip(GRID, v)) for v in itertools.product(*GRID.values())]
@@ -105,17 +109,17 @@ def main():
             mean[j], table[:, j, 1].mean(), (table[:, j, 2] / table[:, j, 3]).mean(), combos[j]))
     chosen = dict(learned.DECODER, **combos[int(order[0])])
     if not args.cv_only:
-        finish(data, matches, chosen, float(mean[order[0]]))
+        finish(data, matches, chosen, float(mean[order[0]]), args.models)
 
 
-def finish(data, matches, decoder, cv_score):
+def finish(data, matches, decoder, cv_score, folder):
     x, y = stack([p for m in matches for p in data[m]])
     models = learned.fit(x, y)
-    learned.save(models)
-    with open(os.path.join(learned.MODEL_DIR, "decoder.json"), "w") as handle:
+    learned.save(models, folder)
+    with open(os.path.join(folder, "decoder.json"), "w") as handle:
         json.dump({"decoder": decoder, "features": data[matches[0]][0]["names"],
                    "cv_spell_f1": cv_score, "matches": matches}, handle, indent=1)
-    print("saved models and decoder costs {} to {}".format(decoder, learned.MODEL_DIR))
+    print("saved models and decoder costs {} to {}".format(decoder, folder))
 
 
 if __name__ == "__main__":

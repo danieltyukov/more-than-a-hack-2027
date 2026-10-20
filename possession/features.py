@@ -62,18 +62,12 @@ def nearest(players, mask, point):
 
 
 class Features:
-    """extra_ball, if given, fills frames where the tactical tracker lost the ball (the aligned
-    broadcast ball, see broadcast.py). ball_seen keeps meaning "the tactical tracker saw it"."""
-
-    def __init__(self, tracking, extra_ball=None):
+    def __init__(self, tracking):
         t = tracking
         self.n = t.n
         self.pitch = t.pitch
         self.ball_seen = np.isfinite(t.ball[:, 0])
-        ball = t.ball
-        if extra_ball is not None:
-            ball = np.where(self.ball_seen[:, None], t.ball, extra_ball)
-        self.ball, self.ball_bridged = bridge_short_gaps(ball)
+        self.ball, self.ball_bridged = bridge_short_gaps(t.ball)
         self.ball_known = np.isfinite(self.ball[:, 0])
         self.ball_z = t.ball_z
 

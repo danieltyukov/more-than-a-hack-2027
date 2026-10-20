@@ -1,4 +1,4 @@
-"""python -m possession [--out PATH] [--no-broadcast]
+"""python -m possession [--out PATH] [--no-broadcast] [--rules]
 
 Writes the submission from the data in ./data (or $MTAH_DATA_DIR). Needs no training: the models
 are in models/. The output is checked with the same validation the official scorer runs.
@@ -11,7 +11,9 @@ import time
 
 import numpy as np
 
+from . import atd, broadcast, pipeline
 from .atd import ROOT
+from .features import Features
 from .pipeline import run, write_submission
 
 sys.path.insert(0, os.path.join(ROOT, "evaluation"))
@@ -25,10 +27,17 @@ def main():
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--no-broadcast", action="store_true",
                         help="ignore the broadcast recording (scores a little worse)")
+    parser.add_argument("--rules", action="store_true",
+                        help="the hand-built first version instead of the learned models")
     args = parser.parse_args()
 
     start = time.time()
-    labels = run(use_broadcast=not args.no_broadcast)
+    if args.rules:
+        t = atd.load()
+        shot = None if args.no_broadcast else broadcast.Broadcast(t).shot
+        labels = pipeline.rule_label(Features(t), t.blocks, shot=shot)
+    else:
+        labels = run(use_broadcast=not args.no_broadcast)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     write_submission(args.out, labels)
 

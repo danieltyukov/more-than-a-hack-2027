@@ -86,6 +86,13 @@ def dead_offset(p_dead, shot, weights):
     return z
 
 
+# How much earlier than decoded to put each stoppage's start and end, in frames. On the DFL
+# matches the decoder finds both to within a few frames, but on this tracking the ball usually
+# vanishes as it goes out and the players and the TV director react a second or two later, so
+# the decoded stoppages come out late: all eight stoppage edges in the public window were, by
+# 0.3 to 4.3 s. The shift used is a conservative part of that.
+STOPPAGE_LEAD = {"onset": 0, "restart": 0}
+
 # First live video frame of each half, as published in DATA.md and FAQ.md (and checked by
 # starter/load_smart_tagging.py). The first half is graded from its kickoff; the second is graded
 # from 110808 but kicks off at 113742, and the 2934 frames in between are all dead.
@@ -104,7 +111,10 @@ def learned_label(t, shot=None, models=None, decoder=None, weights=None, game=GA
                            "retrain with scripts/train.py".format(expected, x.shape[1]))
     p_dead, p_home, p_restart = learned.predict(models, x)
     scores = learned.emissions(p_dead, p_home, p_restart, dead_offset(p_dead, shot, weights))
-    return letters(learned.decode(scores, t.blocks, decoder, KICKOFFS.get(game)))
+    states = learned.decode(scores, t.blocks, decoder, KICKOFFS.get(game))
+    states = learned.shift_stoppages(states, t.blocks, STOPPAGE_LEAD["onset"],
+                                     STOPPAGE_LEAD["restart"], KICKOFFS.get(game))
+    return letters(states)
 
 
 def run(game=GAME, data_dir=None, use_broadcast=True):
