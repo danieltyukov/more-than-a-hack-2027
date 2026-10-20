@@ -50,6 +50,13 @@ class Tracking:
         return self.team == side
 
 
+def _atomic_savez(path, **arrays):
+    """np.savez through a temporary file, so that parallel runs never read a half-written cache."""
+    tmp = "{}.{}.tmp.npz".format(path[:-4], os.getpid())
+    np.savez(tmp, **arrays)
+    os.replace(tmp, path)
+
+
 def slot_teams(meta_path):
     """HOME/AWAY per track slot. The first team in the metadata is the home side."""
     root = ET.parse(meta_path).getroot()
@@ -92,7 +99,7 @@ def load(game=GAME, data_dir=None, source="tactical", use_cache=True):
         raw = _parse(raw_path, n_frames, len(team))
         if use_cache:
             os.makedirs(CACHE_DIR, exist_ok=True)
-            np.savez(cache, raw=raw)
+            _atomic_savez(cache, raw=raw)
 
     scale = np.array([length, width], dtype=np.float32)
     players = raw[:, :-1, :2] * scale

@@ -5,7 +5,7 @@
     python scripts/train.py --cv-only  # just the leave-one-match-out table
 
 Each DFL match is degraded (possession/degrade.py) so that it looks like the competition's
-automatic tracking, COPIES times with different draws. Decoder costs are chosen by spellF1 on
+automatic tracking, COPIES times with different draws, every other copy with the sides swapped. Decoder costs are chosen by spellF1 on
 held-out matches: every match is scored by models that never saw it. Nothing here touches the
 competition data.
 """
@@ -36,12 +36,18 @@ GRID = {
 }
 
 
-def build(match_id, seed):
+def build(match_id, seed, swap=False):
+    """One degraded copy of a match. swap=True relabels home as away and the other way round, so
+    that over the copies neither side is special and the models cannot learn a home prior."""
     t = dfl.load(match_id)
+    labels = t.labels
+    if swap:
+        t = dfl.swap_sides(t)
+        labels = t.labels
     rng = np.random.default_rng(seed)
-    noisy, params = degrade.degrade(t, t.labels, rng)
+    noisy, params = degrade.degrade(t, labels, rng)
     x, names = framefeatures.compute(noisy, Features(noisy))
-    return {"x": x, "y": t.labels, "next": learned.next_restarter(t.labels),
+    return {"x": x, "y": labels, "next": learned.next_restarter(labels),
             "blocks": t.blocks, "names": names, "params": params}
 
 
@@ -79,7 +85,7 @@ def main():
 
     matches = args.matches or dfl.match_ids()
     t0 = time.time()
-    data = {m: [build(m, seed=1000 * i + c) for c in range(args.copies)]
+    data = {m: [build(m, seed=1000 * i + c, swap=bool(c % 2)) for c in range(args.copies)]
             for i, m in enumerate(matches)}
     print("features built for {} matches in {:.0f} s".format(len(matches), time.time() - t0))
 
@@ -93,7 +99,12 @@ def main():
         x, y = stack([p for m in matches if m != held for p in data[m]])
         models = learned.fit(x, y)
         test = data[held][0]
-        scores = learned.emissions(*learned.predict(models, test["x"]))
+        probs = learned.predict(models, test["x"])
+        os.makedirs(args.models, exist_ok=True)
+        np.savez_compressed(os.path.join(args.models, "heldout_{}.npz".format(held)),
+                            p_dead=probs[0], p_home=probs[1], p_restart=probs[2],
+                            labels=test["y"], blocks=np.array(test["blocks"]))
+        scores = learned.emissions(*probs)
         for j, params in enumerate(combos):
             pred = learned.decode(scores, test["blocks"], params)
             table[i, j] = score(test["y"], pred, test["blocks"])
@@ -107,9 +118,13 @@ def main():
     for j in order[:8]:
         print("  spellF1 {:.3f}  macroF1 {:.3f}  poss ratio {:.2f}  {}".format(
             mean[j], table[:, j, 1].mean(), (table[:, j, 2] / table[:, j, 3]).mean(), combos[j]))
-    chosen = dict(learned.DECODER, **combos[int(order[0])])
+    best = int(order[0])
+    print("\nper match at {}".format(combos[best]))
+    for i, m in enumerate(matches):
+        print("  {}  spellF1 {:.3f}  macroF1 {:.3f}  possessions {:.0f} / {:.0f}".format(m, *table[i, best]))
+    chosen = dict(learned.DECODER, **combos[best])
     if not args.cv_only:
-        finish(data, matches, chosen, float(mean[order[0]]), args.models)
+        finish(data, matches, chosen, float(mean[best]), args.models)
 
 
 def finish(data, matches, decoder, cv_score, folder):

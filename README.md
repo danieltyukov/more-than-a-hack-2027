@@ -1,3 +1,78 @@
+# Ball possession from automatic tracking
+
+Our entry for More than a Hack 2027, Phase 1: one label per frame of the tactical video (home in
+possession, away in possession, or dead ball) for Barcelona v Athletic Club. The organisers'
+README follows, unchanged, after the line at the end of this section.
+
+| | public window (5 min, 17 possessions) | 7 held-out DFL matches |
+|---|---|---|
+| spellF1 | 0.600 | 0.577 |
+| macroF1 | 0.891 | 0.907 |
+
+The organisers' baseline gets 0.33 / 0.62 on the same five minutes. The DFL column is the honest
+one: those matches were never used to choose anything that scores them.
+
+## Reproduce the submission
+
+```bash
+python3.11 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-possession.txt
+# unpack the match data into ./data as described in DATA.md, or point MTAH_DATA_DIR at it
+python -m possession --out evaluation/results/TEAM.csv
+python evaluation/validate_submission.py evaluation/results/TEAM.csv
+```
+
+About 40 seconds on a laptop. Nothing is trained at this point (the fitted models are in
+`models/`), and the same data gives the same file, byte for byte.
+
+## How it works
+
+The full write-up is [docs/technical-report.md](docs/technical-report.md). In short:
+
+1. Per-frame features from the tracking alone, without player identities: who is near the
+   ball and where it is heading, how fast everyone is moving, how each side is shaped, and the
+   same quantities a second or two either side.
+2. Three classifiers (gradient boosting): is the ball dead, which side has it if it is alive,
+   which side restarts if it is dead. They are trained on the seven public Sportec/DFL Bundesliga
+   matches, which come with per-frame labels, after degrading that tracking to look like this
+   match's: long ball gaps, aerial balls projected onto the grass, players dropping out.
+3. The broadcast feed, lined up with the tactical video automatically (one offset per half).
+   TV directors cut to close-ups and replays when the ball is dead, and that is used as extra
+   dead-ball evidence.
+4. A Viterbi decoder over home, away, and dead-with-home-or-away-to-restart, with a price on
+   every change of state, so possessions come out as whole intervals and short flickers do not
+   count.
+
+## What is ours in this repository
+
+| Path | |
+|---|---|
+| `possession/` | the pipeline; `python -m possession` writes the submission |
+| `models/` | the fitted classifiers, decoder costs and broadcast weights |
+| `scripts/get_dfl.py` | downloads the DFL training matches (about 2.6 GB) |
+| `scripts/train.py` | degrades them, cross-validates, fits the models |
+| `scripts/fit_broadcast.py` | fits the broadcast weights on the public five minutes |
+| `tests/` | data-free unit tests, run in CI with the organisers' scorer |
+| `docs/technical-report.md` | the technical document |
+
+To rebuild `models/` from scratch:
+
+```bash
+pip install -r requirements-dev.txt
+python scripts/get_dfl.py
+python scripts/train.py           # leave-one-match-out CV, then the final models
+python scripts/fit_broadcast.py   # needs the match data
+```
+
+## Data and licences
+
+The match data is not in this repository and never was; `data/` is gitignored, as the terms
+require. The training data is the Sportec Open DFL dataset (Bassek, Rein, Weber and Memmert,
+Scientific Data 12:195, 2025), CC-BY 4.0, downloaded by `scripts/get_dfl.py` and not
+redistributed here. Our code is under the same MIT licence as the organisers'.
+
+---
+
 # More than a Hack 2027 — Phase 1: Ball Possession
 
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)

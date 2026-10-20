@@ -16,7 +16,7 @@ import os
 import numpy as np
 from lxml import etree
 
-from .atd import AWAY, CACHE_DIR, HOME, ROOT, Tracking
+from .atd import AWAY, CACHE_DIR, HOME, ROOT, Tracking, _atomic_savez
 
 DFL_DIR = os.path.join(ROOT, "external", "dfl")
 HALF_GAP = 500                       # NaN frames between the halves
@@ -133,7 +133,16 @@ def load(match_id, folder=DFL_DIR, use_cache=True):
 
     if use_cache:
         os.makedirs(CACHE_DIR, exist_ok=True)
-        np.savez(cache, players=players, speed=speed, ball=ball, ball_z=ball_z, team=team,
-                 pitch=np.array([length, width]), labels=labels, blocks=np.array(blocks))
+        _atomic_savez(cache, players=players, speed=speed, ball=ball, ball_z=ball_z, team=team,
+                      pitch=np.array([length, width]), labels=labels, blocks=np.array(blocks))
     return LabelledTracking(players, speed, ball, ball_z, team, (length, width), labels, blocks,
                             match_id)
+
+
+def swap_sides(t):
+    """The same match with home and away exchanged: team flags and H/A labels both flipped."""
+    labels = t.labels.copy()
+    labels[t.labels == LABEL_H] = LABEL_A
+    labels[t.labels == LABEL_A] = LABEL_H
+    return LabelledTracking(t.players, t.speed, t.ball, t.ball_z, (1 - t.team).astype(np.int8),
+                            t.pitch, labels, t.blocks, t.name + "-swapped")
