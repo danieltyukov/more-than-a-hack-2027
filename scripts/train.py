@@ -82,6 +82,7 @@ def main():
                         help="degraded copies of each match (default %(default)s)")
     parser.add_argument("--models", default=learned.MODEL_DIR, help="where to write the models")
     parser.add_argument("--gbm", default="", help="overrides for learned.GBM, e.g. max_iter=600")
+    parser.add_argument("--no-swap", action="store_true", help="never swap home and away")
     args = parser.parse_args()
     for item in filter(None, args.gbm.split(",")):
         key, value = item.split("=")
@@ -89,7 +90,8 @@ def main():
 
     matches = args.matches or dfl.match_ids()
     t0 = time.time()
-    data = {m: [build(m, seed=1000 * i + c, swap=bool(c % 2)) for c in range(args.copies)]
+    data = {m: [build(m, seed=1000 * i + c, swap=bool(c % 2) and not args.no_swap)
+                for c in range(args.copies)]
             for i, m in enumerate(matches)}
     print("features built for {} matches in {:.0f} s".format(len(matches), time.time() - t0))
 

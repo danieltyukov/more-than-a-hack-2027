@@ -93,6 +93,12 @@ def stack_features(p_dead, p_home, p_restart):
     return np.column_stack(cols).astype(np.float32)
 
 
+def average(probs):
+    """Average probabilities from several model sets in log-odds."""
+    z = np.mean([np.log(p) - np.log1p(-p) for p in probs], axis=0)
+    return np.clip(1.0 / (1.0 + np.exp(-z)), EPS, 1 - EPS)
+
+
 def emissions(p_dead, p_home, p_restart, dead_offset=None, temper=1.0):
     """(n, 4) log-scores for the hidden states of segment.py.
 
@@ -184,10 +190,14 @@ def save(models, folder=MODEL_DIR):
             pickle.dump(model, handle, protocol=4)
 
 
-def load(folder=MODEL_DIR):
+def load(folder=MODEL_DIR, prefix=""):
     # these are the repository's own files written by save(); never point this at anything else
     models = {}
     for name in ("dead", "team", "restart"):
-        with open(os.path.join(folder, name + ".pkl"), "rb") as handle:
+        with open(os.path.join(folder, prefix + name + ".pkl"), "rb") as handle:
             models[name] = pickle.load(handle)
     return models
+
+
+def has_stack(folder=MODEL_DIR):
+    return os.path.isfile(os.path.join(folder, "stack_dead.pkl"))

@@ -11,10 +11,14 @@ import numpy as np
 from . import shape
 from .atd import AWAY, HOME
 from .deadball import metres_outside
+from .features import nearest
 from .smooth import frames_since, frames_until, window_frac, window_mean
 
 REACH = 1.5
 CLIP = 750                      # frames; "more than 30 s ago" is all the same
+# team-shape columns (see shape.shape_features) whose two-second trend is worth having: each
+# side's centroid and forward speed, and how tightly each side marks the other
+SHAPE_TRENDS = (0, 6, 10, 16, 34, 35)
 
 
 def _past_mean(x, w):
@@ -106,6 +110,11 @@ def compute(t, f):
     cols["ball_turn"] = turn
     cols["rel_home"] = _relative_speed(t, f, f.slot_home)
     cols["rel_away"] = _relative_speed(t, f, f.slot_away)
+    # where the ball is heading: who is nearest to it half a second and a second from now
+    for horizon in (0.5, 1.0):
+        ahead = f.ball + f.ball_vel * horizon
+        for side, name in ((HOME, "home"), (AWAY, "away")):
+            cols["ahead%.1f_%s" % (horizon, name)] = nearest(t.players, t.team == side, ahead)[0]
 
     length, width = t.pitch
     cols["ball_x_home"] = _home_attack_x(t, f.ball[:, 0])
@@ -146,6 +155,9 @@ def compute(t, f):
     cols["until_ctrl_diff"] = cols["until_ctrl_home"] - cols["until_ctrl_away"]
 
     sh = shape.shape_features(t)
+    for c in SHAPE_TRENDS:
+        cols["shape%02d_past2s" % c] = _past_mean(sh[:, c], 50)
+        cols["shape%02d_next2s" % c] = _future_mean(sh[:, c], 50)
     names = list(cols) + ["shape%02d" % i for i in range(sh.shape[1])]
     x = np.column_stack([np.asarray(cols[k], dtype=np.float32) for k in cols] + [sh])
     return x, names

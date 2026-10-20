@@ -6,11 +6,12 @@ README follows, unchanged, after the line at the end of this section.
 
 | | public window (5 min, 17 possessions) | 7 held-out DFL matches |
 |---|---|---|
-| spellF1 | 0.600 | 0.577 |
-| macroF1 | 0.891 | 0.907 |
+| spellF1 | 0.650 | 0.610 |
+| macroF1 | 0.916 | 0.914 |
 
-The organisers' baseline gets 0.33 / 0.62 on the same five minutes. The DFL column is the honest
-one: those matches were never used to choose anything that scores them.
+The organisers' baseline gets 0.33 / 0.62 on the same five minutes. The DFL column is the more
+reliable one: about 3,000 possessions, each match scored by models trained without it (the decoder
+costs were picked on those same scores, which flatters them a little).
 
 ## Reproduce the submission
 
@@ -32,8 +33,8 @@ The full write-up is [docs/technical-report.md](docs/technical-report.md). In sh
 1. Per-frame features from the tracking alone, without player identities: who is near the
    ball and where it is heading, how fast everyone is moving, how each side is shaped, and the
    same quantities a second or two either side.
-2. Three classifiers (gradient boosting): is the ball dead, which side has it if it is alive,
-   which side restarts if it is dead. They are trained on the seven public Sportec/DFL Bundesliga
+2. Three classifiers (gradient boosting, two model sets averaged): is the ball dead, which side
+   has it if it is alive, which side restarts if it is dead. They are trained on the seven public Sportec/DFL Bundesliga
    matches, which come with per-frame labels, after degrading that tracking to look like this
    match's: long ball gaps, aerial balls projected onto the grass, players dropping out.
 3. The broadcast feed, lined up with the tactical video automatically (one offset per half).
@@ -50,8 +51,10 @@ The full write-up is [docs/technical-report.md](docs/technical-report.md). In sh
 | `possession/` | the pipeline; `python -m possession` writes the submission |
 | `models/` | the fitted classifiers, decoder costs and broadcast weights |
 | `scripts/get_dfl.py` | downloads the DFL training matches (about 2.6 GB) |
-| `scripts/train.py` | degrades them, cross-validates, fits the models |
+| `scripts/train.py` | degrades them, cross-validates, fits a model set |
 | `scripts/fit_broadcast.py` | fits the broadcast weights on the public five minutes |
+| `scripts/sanity.py` | full-match checks of a submission that need no ground truth |
+| `scripts/stack.py` | a second-stage experiment that did not make it in (see the report) |
 | `tests/` | data-free unit tests, run in CI with the organisers' scorer |
 | `docs/technical-report.md` | the technical document |
 
@@ -60,7 +63,8 @@ To rebuild `models/` from scratch:
 ```bash
 pip install -r requirements-dev.txt
 python scripts/get_dfl.py
-python scripts/train.py           # leave-one-match-out CV, then the final models
+python scripts/train.py --no-swap --models models/first/noswap
+python scripts/train.py --models models/first/swap
 python scripts/fit_broadcast.py   # needs the match data
 ```
 

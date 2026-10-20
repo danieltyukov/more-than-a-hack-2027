@@ -3,9 +3,10 @@
     python scripts/fit_broadcast.py
 
 The DFL matches have no broadcast, so the learned dead-ball model never sees the shot type. This
-fits a three-feature logistic regression on the public five minutes -- the learned model's dead
-log-odds, and the share of the surrounding second the broadcast shows no pitch or another view --
-and writes the weights to models/broadcast.json. Three weights and an intercept on 7500 frames.
+fits a three-feature logistic regression on the public five minutes (the learned models' final
+dead log-odds, and the share of the surrounding second the broadcast shows no pitch or another
+view) and writes the weights to models/broadcast.json. Three weights and an intercept on 7500
+frames. Rerun it whenever models/ changes.
 """
 
 import json
@@ -20,9 +21,8 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 
 import possession_metrics as pm  # noqa: E402
-from possession import atd, broadcast, framefeatures, learned  # noqa: E402
-from possession.features import Features  # noqa: E402
-from possession.pipeline import shot_features  # noqa: E402
+from possession import atd, broadcast, learned  # noqa: E402
+from possession.pipeline import probabilities, shot_features  # noqa: E402
 
 GT = os.path.join(ROOT, "evaluation", "gt", "BAR-ATH_possession_gt_public.csv")
 L2 = 1.0
@@ -30,8 +30,7 @@ L2 = 1.0
 
 def main():
     t = atd.load()
-    x, _ = framefeatures.compute(t, Features(t))
-    p_dead, _, _ = learned.predict(learned.load(), x)
+    p_dead = probabilities(t)[0]
     shot = broadcast.Broadcast(t).shot
     gt = pm.label_codes(pm.read_label_csv(GT))
     graded = gt != pm.X

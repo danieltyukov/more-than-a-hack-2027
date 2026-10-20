@@ -64,8 +64,18 @@ def rule_label(f, blocks, params=None, shot=None):
     return letters(states)
 
 
+def first_stage_sets(folder=learned.MODEL_DIR):
+    """Folders of first-stage models: models/first/* if there are several, else models/ itself."""
+    nested = os.path.join(folder, "first")
+    if os.path.isdir(nested):
+        return [os.path.join(nested, d) for d in sorted(os.listdir(nested))]
+    return [folder]
+
+
 def load_settings(folder=learned.MODEL_DIR):
-    with open(os.path.join(folder, "decoder.json")) as handle:
+    """(decoder costs, broadcast weights or None). The second stage brings its own costs."""
+    name = "stack.json" if learned.has_stack(folder) else "decoder.json"
+    with open(os.path.join(folder, name)) as handle:
         decoder = json.load(handle)["decoder"]
     path = os.path.join(folder, "broadcast.json")
     weights = None
@@ -73,6 +83,24 @@ def load_settings(folder=learned.MODEL_DIR):
         with open(path) as handle:
             weights = json.load(handle)
     return decoder, weights
+
+
+def probabilities(t, folder=learned.MODEL_DIR):
+    """(p_dead, p_home, p_restart) per frame: every first-stage set, averaged, then the second
+    stage if there is one."""
+    x, _ = framefeatures.compute(t, Features(t))
+    probs = []
+    for path in first_stage_sets(folder):
+        models = learned.load(path)
+        expected = models["dead"].n_features_in_
+        if x.shape[1] != expected:
+            raise RuntimeError("the models in {} expect {} features, framefeatures gives {}: "
+                               "retrain with scripts/train.py".format(path, expected, x.shape[1]))
+        probs.append(learned.predict(models, x))
+    p = tuple(learned.average([pr[k] for pr in probs]) for k in range(3))
+    if learned.has_stack(folder):
+        p = learned.predict(learned.load(folder, "stack_"), learned.stack_features(*p))
+    return p
 
 
 def dead_offset(p_dead, shot, weights):
@@ -91,7 +119,7 @@ def dead_offset(p_dead, shot, weights):
 # vanishes as it goes out and the players and the TV director react a second or two later, so
 # the decoded stoppages come out late: all eight stoppage edges in the public window were, by
 # 0.3 to 4.3 s. The shift used is a conservative part of that.
-STOPPAGE_LEAD = {"onset": 0, "restart": 0}
+STOPPAGE_LEAD = {"onset": 25, "restart": 12}
 
 # First live video frame of each half, as published in DATA.md and FAQ.md (and checked by
 # starter/load_smart_tagging.py). The first half is graded from its kickoff; the second is graded
@@ -99,17 +127,9 @@ STOPPAGE_LEAD = {"onset": 0, "restart": 0}
 KICKOFFS = {"BAR-ATH": {1: 11185, 2: 113742}}
 
 
-def learned_label(t, shot=None, models=None, decoder=None, weights=None, game=GAME):
-    if models is None:
-        models = learned.load()
-    if decoder is None:
-        decoder, weights = load_settings()
-    x, _ = framefeatures.compute(t, Features(t))
-    expected = models["dead"].n_features_in_
-    if x.shape[1] != expected:
-        raise RuntimeError("the models in models/ expect {} features, framefeatures gives {}: "
-                           "retrain with scripts/train.py".format(expected, x.shape[1]))
-    p_dead, p_home, p_restart = learned.predict(models, x)
+def learned_label(t, shot=None, folder=learned.MODEL_DIR, game=GAME):
+    decoder, weights = load_settings(folder)
+    p_dead, p_home, p_restart = probabilities(t, folder)
     scores = learned.emissions(p_dead, p_home, p_restart, dead_offset(p_dead, shot, weights))
     states = learned.decode(scores, t.blocks, decoder, KICKOFFS.get(game))
     states = learned.shift_stoppages(states, t.blocks, STOPPAGE_LEAD["onset"],

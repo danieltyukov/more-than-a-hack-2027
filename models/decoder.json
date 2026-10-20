@@ -1,10 +1,16 @@
 {
  "decoder": {
-  "switch_ha": 6.0,
-  "switch_dead": 8.0,
+  "switch_ha": 9.0,
+  "switch_dead": 12.0,
   "switch_restarter": 1.0,
   "temper": 1.0
  },
+ "first_stage": [
+  "first/noswap",
+  "first/swap"
+ ],
+ "cv_spell_f1": 0.61,
+ "note": "held-out DFL spellF1 is flat between turnover costs 6 and 9 (0.612, 0.610); 9 is used because the competition's ground truth changes possession about half as often as DFL's",
  "features": [
   "d1_home",
   "d2_home",
@@ -20,6 +26,10 @@
   "ball_turn",
   "rel_home",
   "rel_away",
+  "ahead0.5_home",
+  "ahead0.5_away",
+  "ahead1.0_home",
+  "ahead1.0_away",
   "ball_x_home",
   "ball_y_mid",
   "ball_outside",
@@ -56,6 +66,18 @@
   "until_ctrl_away",
   "since_ctrl_diff",
   "until_ctrl_diff",
+  "shape00_past2s",
+  "shape00_next2s",
+  "shape06_past2s",
+  "shape06_next2s",
+  "shape10_past2s",
+  "shape10_next2s",
+  "shape16_past2s",
+  "shape16_next2s",
+  "shape34_past2s",
+  "shape34_next2s",
+  "shape35_past2s",
+  "shape35_next2s",
   "shape00",
   "shape01",
   "shape02",
@@ -93,7 +115,6 @@
   "shape34",
   "shape35"
  ],
- "cv_spell_f1": 0.5767361326472987,
  "matches": [
   "J03WMX",
   "J03WN1",

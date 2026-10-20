@@ -65,5 +65,5 @@ env/
 cache/
 external/
 runs/
-models/heldout_*.npz
+models/**/heldout_*.npz
 docs/*.pdf

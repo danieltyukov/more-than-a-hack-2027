@@ -4,9 +4,9 @@ More than a Hack 2027, Phase 1. Technical document.
 
 ## Summary
 
-Three gradient-boosted classifiers look at every frame and say how likely the ball is to be dead,
-which side has it if it is alive, and which side will restart if it is dead. They are trained on
-the seven public Sportec/DFL Bundesliga matches, whose tracking we degrade until it looks like this
+Gradient-boosted classifiers look at every frame and say how likely the ball is to be dead, which
+side has it if it is alive, and which side will restart if it is dead. They are trained on the
+seven public Sportec/DFL Bundesliga matches, whose tracking we degrade until it looks like this
 match's automatic tracking, because those matches come with per-frame labels and this one comes
 with five minutes. A Viterbi decoder over four states turns the per-frame probabilities into whole
 possessions, with a fixed price on every change of state. The broadcast recording, lined up with
@@ -15,12 +15,13 @@ and replays when the ball is dead.
 
 | | spellF1 | macroF1 | possessions |
 |---|---|---|---|
-| Public window, our submission | 0.600 | 0.891 | 17 (truth 17) |
+| Public window, our submission | 0.650 | 0.916 | 15 (truth 17) |
 | Public window, organisers' baseline (smooth50) | 0.326 | 0.621 | 26 |
-| Seven held-out DFL matches, mean | 0.577 | 0.907 | 76% of truth |
+| Seven held-out DFL matches, mean | 0.610 | 0.914 | 71% of truth |
 
-The DFL row is the one we trust: every match there is scored by models that never saw it, over
-about 3,000 possessions. The public window has 17.
+The DFL row is the one we trust most: every match there is scored by models that never saw it,
+over about 3,000 possessions. The public window has 17, and one possession more or less moves
+spellF1 by about 0.06.
 
 ## What the metric rewards
 
@@ -35,9 +36,8 @@ Two facts about the data shaped the rest.
   and 3 s, so the provider seems to bridge short ones; what is left is 133 gaps of 3 s or more.
   Most missing frames are dead ball (the ball is out of shot or in someone's hands), but around a
   fifth of live frames have no ball either, usually in crowded moments.
-- There are five minutes of ground truth, 17 possessions. One possession more or less moves
-  spellF1 by about 0.06 there. We used the window as a test and fitted only four numbers on it
-  (the broadcast weights below).
+- There are five minutes of ground truth. We used them as a test, and fitted only four numbers on
+  them (the broadcast weights below) plus the size of one timing correction.
 
 ## Assets: used, tried, dropped
 
@@ -48,7 +48,7 @@ Two facts about the data shaped the rest.
 | Broadcast ball | Tried as a filler for tactical ball gaps (about 5,900 graded frames). Dropped: it added false turnovers, mostly aerial balls that the two cameras put on different spots of the grass |
 | Smart Tagging | Tried as a team prior. Dropped as a model input: per code, its phases agreed with the public ground truth on 44% to 100% of live frames, and the long "final third" and "box" phases span turnovers. Kept for full-match sanity checks (`scripts/sanity.py`) |
 | Tactical homography | Not needed, the ATD is already on the pitch |
-| Videos | Not used. The ball is about 4 px across in the tactical view, and the frames the tracker lost are mostly occlusions that a second detector would lose too |
+| Videos | Not used. The ball is about 4 px across in the tactical view, the frames the tracker lost are mostly occlusions, and an upper bound (below) says even perfect gap filling would add little |
 | Sportec Open DFL dataset (external) | Training data: seven full matches, 25 Hz, with the provider's per-frame ball status and owning team. CC-BY 4.0 |
 | Kickoff frames from DATA.md and FAQ.md | The 2,934 graded frames before the second-half kickoff are dead; the second after each kickoff is live |
 
@@ -56,27 +56,28 @@ Two facts about the data shaped the rest.
 
 ### Features
 
-One row per frame (`possession/framefeatures.py`), identity-free, and computed by the same code
-for this match and for the DFL matches:
+One row per frame (`possession/framefeatures.py`, 102 columns), identity-free, and computed by the
+same code for this match and for the DFL matches:
 
-- Around the ball: nearest and second-nearest player of each side, players within 2 m and
-  5 m, ball speed, acceleration and turning angle, ball speed relative to the nearest player of
-  each side, how far past a line the ball is
-- Where the ball is heading: nearest player of each side to where the ball will be in 0.5 s
-  and 1 s at its current velocity (the "ball prediction" idea of Link and Hoernig, 2017)
-- Visibility: frames since the ball was last seen and until it is seen again, share seen in
-  the surrounding second and four seconds
+- Around the ball: nearest and second-nearest player of each side, players within 2 m and 5 m,
+  ball speed, acceleration and turning angle, ball speed relative to the nearest player of each
+  side, how far past a line the ball is
+- Where the ball is heading: nearest player of each side to where the ball will be in 0.5 s and
+  1 s at its current velocity (the "ball prediction" idea of Link and Hoernig, 2017)
+- Visibility: frames since the ball was last seen and until it is seen again, share seen in the
+  surrounding second and four seconds
 - Movement: mean player speed per side, and its average over the two seconds before and after
 - Touch balance: who is closer to the ball, averaged over 0.25, 1 and 3 s before and after
-- Control history: frames since and until each side last clearly had the ball at its feet
-  (within 1 m, nobody from the other side within 2.5 m, ball slower than 6 m/s)
+- Control history: frames since and until each side last clearly had the ball at its feet (within
+  1 m, nobody from the other side within 2.5 m, ball slower than 6 m/s)
 - Team shape, per side and in its own attacking direction: centroid, spread, depth, last line,
   forward speed and how tightly each side marks the other, plus the two-second trend of the
   centroid, forward speed and marking
 
 The team-shape group carries a lot when the ball is missing. On its own, without ever seeing the
 ball, a classifier on those features named the side in possession on 83% of the public window's
-live frames.
+live frames. Adding the ball projection and the shape trends took held-out DFL spellF1 from 0.577
+to 0.598.
 
 ### Training data
 
@@ -89,8 +90,6 @@ the models cannot fit one setting:
 - aerial balls are moved to where the camera ray through them meets the grass, as a single wide
   camera would see them
 - players drop out for a few seconds at a time, and positions get slowly varying noise
-- every other copy has home and away exchanged, so neither side is special and the models cannot
-  learn a home-team prior
 
 One thing had to be taken out rather than put in. The DFL files freeze the ball for the whole of a
 stoppage, often past a line, and jump it to the restart spot on the restart frame. Our first
@@ -107,7 +106,14 @@ roughly, the number of tracked players (20.5 per graded frame here).
 
 `possession/learned.py`: three `HistGradientBoostingClassifier`s from scikit-learn (400 trees, 63
 leaves): dead or alive on all frames; home or away on live frames; home or away to restart on dead
-frames. Two degraded copies of each of the seven matches, every second frame, about a million rows.
+frames. Each is trained on two degraded copies of each of the seven matches, every second frame,
+about a million rows.
+
+There are two such sets, and their log-odds are averaged (`models/first/`). They differ in one
+thing: the second set has home and away exchanged on every other copy, so it cannot learn that
+home teams tend to have the ball. On DFL the swapped set is better (0.610 against 0.599); on this
+match the unswapped one agreed more with the public window and the Smart Tagging. The average
+scores 0.612 on DFL, as good as either.
 
 ### Broadcast alignment
 
@@ -122,18 +128,28 @@ That gives, for every tactical frame, what the TV director is showing. On the pu
 of dead frames show no pitch at all on the broadcast, against 3% of live frames. The share of the
 surrounding second with no pitch, and with a pitch view that is not the live picture, enter the
 dead-ball log-odds through a logistic regression on the public window
-(`scripts/fit_broadcast.py`): the learned model's log-odds plus those two shares, four weights in
-all.
+(`scripts/fit_broadcast.py`): the learned models' log-odds plus those two shares, four weights in
+all. On the public window it takes per-frame dead/alive accuracy from 0.875 to 0.952.
 
 ### Decoder
 
 `possession/segment.py`: Viterbi over four hidden states: home, away, dead with home to restart,
 dead with away to restart. A dead state can only end in its own side's possession, so the player
 standing over the ball during a stoppage (the thrower, the corner taker, the goalkeeper at a goal
-kick) decides who restarts, rather than whatever happens in the first second after it. Every
-change of state costs a fixed log-probability: 6 for a turnover, 8 to enter or leave a stoppage,
-1 to change our mind about who restarts. The costs were chosen by spellF1 on held-out DFL matches;
-the curve is flat between 4 and 9 for a turnover (0.575 to 0.577).
+kick) decides who restarts, rather than whatever happens in the first second after it.
+
+Every change of state costs a fixed log-probability: 9 for a turnover, 12 to enter or leave a
+stoppage, 1 to change our mind about who restarts. Held-out DFL spellF1 is flat across turnover
+costs from 4 to 9 (0.610 to 0.612 with the stoppage cost at 12). We took the top of that range because the DFL labels change
+possession at almost every opponent touch, 7.8 to 9 times per live minute, while the public
+window runs at 4.2: costs tuned on DFL produce too many possessions here.
+
+Then one timing correction. On DFL the decoder finds stoppage starts and restarts to within a few
+frames. On this match all eight stoppage edges in the public window came out late, by 0.3 to 4.3 s:
+the ball usually vanishes the moment it goes out, and players and the TV director react a second or
+two later. Eight out of eight with the same sign is not chance (1 in 128), so every predicted
+stoppage is moved earlier, its start by 1 s and its end by 0.5 s, about half the median lag. The
+shift never takes more than half of the possession before a stoppage, so it cannot delete one.
 
 ## Possession rules as implemented
 
@@ -144,53 +160,72 @@ the curve is flat between 4 and 9 for a turnover (0.575 to 0.577).
   changes nothing.
 - A touch that does not stop the ball shows up as a frame or two of opponent evidence, short of the
   switch cost. A touch after which the opponent keeps the ball pays it.
-- Short possessions do come out when the evidence is clear: the DFL labels are full of them and
-  the ground truth has them too (0.8 s and 1.3 s in the public window). The decoder costs were
-  tuned on matches where they count.
+- Short possessions do come out when the evidence is clear: the full match has 49 under two
+  seconds. The ground truth has them too (0.8 s and 1.3 s in the public window).
 - Dead ball has no owner. While it is dead the decoder carries who will restart, and changes its
   mind only at a price.
-- The ball is dead from the start of the second half's graded frames to its kickoff.
+- The ball is dead from the start of the second half's graded frames to its kickoff, and alive for
+  the second after each kickoff.
 
 ## Results
 
 ### Held-out DFL matches
 
-Leave-one-match-out: each match scored by models trained on the other six, decoder costs chosen
-on the mean (`python scripts/train.py --cv-only`).
+Leave-one-match-out: each match scored by models trained on the other six
+(`python scripts/train.py --cv-only`, then the two sets averaged).
 
-Mean over the seven matches: spellF1 0.577, macroF1 0.907, with 76% as many possessions predicted
-as there are. Per match, at each match's own best costs, spellF1 ranged from 0.502 to 0.625.
+| Match | spellF1 | macroF1 | Possessions predicted / true |
+|---|---|---|---|
+| 1. FC Köln v FC Bayern München | 0.534 | 0.910 | 297 / 511 |
+| VfL Bochum v Bayer 04 Leverkusen | 0.570 | 0.897 | 340 / 500 |
+| Fortuna Düsseldorf v SSV Jahn Regensburg | 0.644 | 0.916 | 286 / 402 |
+| Fortuna Düsseldorf v F.C. Hansa Rostock | 0.616 | 0.906 | 346 / 456 |
+| Fortuna Düsseldorf v 1. FC Nürnberg | 0.627 | 0.921 | 290 / 421 |
+| Fortuna Düsseldorf v FC St. Pauli | 0.646 | 0.921 | 324 / 401 |
+| Fortuna Düsseldorf v 1. FC Kaiserslautern | 0.631 | 0.927 | 287 / 370 |
+| Mean | 0.610 | 0.914 | 2170 / 3061 |
+
+Köln v Bayern is the hardest match in every run we made; it also has the most possessions, 511.
 
 ### This match
 
-| Version | Public spellF1 | Public macroF1 | Full match: possessions, dead share, stoppages |
+| Version | Public spellF1 | Public macroF1 | Full match: possessions, dead, stoppages, phase agreement |
 |---|---|---|---|
-| Organisers' baseline, smooth50 | 0.326 | 0.621 | 594, 32%, 133 |
-| Hand-built rules + Viterbi + broadcast shot (`--rules`) | 0.550 | 0.858 | 268, 38%, 121 |
-| Learned models + broadcast shot (submission) | 0.600 | 0.891 | 333, 48%, 129 |
+| Organisers' baseline, smooth50 | 0.326 | 0.621 | 594, 32%, 133, 0.661 |
+| Hand-built rules + Viterbi + broadcast shot (`--rules`) | 0.550 | 0.858 | 268, 38%, 121, 0.724 |
+| First learned version (86 features, one model set) | 0.600 | 0.891 | 333, 48%, 129, 0.779 |
+| Submission | 0.650 | 0.916 | 293, 50%, 120, 0.795 |
 
-The full-match columns are what `scripts/sanity.py` prints. A dead share near half is what a
-106-minute graded window with about 55 minutes of ball in play gives. The literature has about
-108 stoppages per match (Siegle and Lames, 2012).
+The full-match columns are what `scripts/sanity.py` prints; "phase agreement" is the share of live
+frames inside a tagged attacking or defending phase whose side agrees with the tag. A dead share
+near half is what a 106-minute graded window with about 55 minutes of ball in play gives, and the
+literature has about 108 stoppages per match (Siegle and Lames, 2012). Of the 58 tagged set
+pieces, 55 have a predicted restart within two seconds of the tagged window.
+
+### Tried and not used
+
+| Idea | Held-out DFL spellF1 | Why it is not in |
+|---|---|---|
+| A second stage reading the first-stage log-odds two seconds either side of each frame | 0.621 (from 0.612) | On this match it agreed less with the public window per frame (macroF1 0.898-0.908 against 0.916, dead/alive F1 0.975 against 0.981). A model of DFL's probability curves seems to be the first thing to break when the tracking changes |
+| Bigger trees (127 leaves, 600 trees) | 0.606 (from 0.608) | No gain |
+| Averaging two similar model sets | 0.609 | No gain; they make the same mistakes |
+| Perfect ball in live play (upper bound for any gap filling) | +0.03 on one match | A real detector would recover a fraction of that, at a large cost |
 
 ## Limitations and what we would do next
 
-- Stoppage edges. On DFL the decoder finds stoppage starts and restarts to within a few frames.
-  On this match all eight stoppage edges in the public window came out late, by 0.3 to 4.3 s: the
-  ball usually vanishes the moment it goes out, and the players and the TV director react a second
-  or two later. A ball detector run on the tactical video right around the stoppage, or the
-  referee's whistle from the audio, would pin the start down.
-- Very short possessions. Of the 17 public possessions, the 0.8 s and 1.3 s ones are missed.
-  With the ball missing in crowded moments there is often nothing to see them by.
-- Label conventions. DFL's owning team flips at almost every opponent touch (7.8-9 possessions
-  per live minute); the public window runs at 4.2. Barcelona keep the ball for long spells, which
-  explains part of it, but some is definition, and the decoder costs were tuned on DFL's.
-- Domain gap. The degradation is our model of the automatic tracker, checked only against
-  aggregate statistics. With more of this provider's data, or a few labelled minutes from other
-  matches, we would fit the gap pattern directly.
-- What we did not try: our own ball detection on the videos, sequence models (a temporal
-  convolutional network or a transformer over the whole frame sequence), and fine-tuning on the
-  public window.
+- Stoppage edges are fixed by a constant shift measured on eight edges. A ball detector run on the
+  tactical video around each stoppage, or the referee's whistle from the audio, would place them
+  frame by frame.
+- Very short possessions are hard to see. Of the 17 public possessions, the 0.8 s and 1.3 s ones
+  are missed; with the ball lost in crowded moments there is often nothing to see them by.
+- The labels' conventions differ. DFL's owning team flips far more often than this ground truth.
+  Barcelona keep the ball for long spells, which explains part of it, but part is definition, and
+  we can only correct for it through the decoder costs.
+- The degradation is our model of the automatic tracker, checked only against aggregate
+  statistics. With more of this provider's data, or a few labelled minutes from other matches, we
+  would fit the gap pattern directly.
+- Not tried: our own ball detection on the videos, and sequence models (a temporal convolutional
+  network or a transformer over the whole match).
 
 ## Reproduction
 
@@ -209,10 +244,14 @@ Rebuilding `models/` from scratch:
 
 ```bash
 pip install -r requirements-dev.txt
-python scripts/get_dfl.py          # the seven DFL matches, about 2.6 GB, checksummed
-python scripts/train.py            # leave-one-match-out CV, then the final models
-python scripts/fit_broadcast.py    # the four broadcast weights, on the public window
+python scripts/get_dfl.py                                    # the seven DFL matches, 2.6 GB
+python scripts/train.py --no-swap --models models/first/noswap
+python scripts/train.py --models models/first/swap
+python scripts/fit_broadcast.py                              # needs the match data
 ```
+
+`models/decoder.json` holds the decoder costs, which `train.py` reports but does not write at the
+top level. The two training runs take about half an hour each on a 32-core machine.
 
 ## References
 

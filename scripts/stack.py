@@ -1,17 +1,21 @@
 """Second stage: learn the temporal shape of the first-stage probabilities.
 
-    python scripts/stack.py RUN_DIR [--write]
+    python scripts/stack.py RUN_DIR [RUN_DIR ...] [--write FOLDER]
 
-RUN_DIR holds the held-out predictions train.py writes for every DFL match (heldout_*.npz): the
-first-stage probabilities on a match from models that never saw it. A second set of classifiers
-reads, for each frame, those probabilities at offsets up to two seconds either side and in
-windows around it, and is cross-validated the same way, leave one match out. Its output feeds the
-same decoder. With --write the second-stage models go into models/ next to the first.
+Each RUN_DIR holds the held-out predictions train.py writes for every DFL match (heldout_*.npz):
+the first-stage probabilities on a match from models that never saw it. With several, their
+log-odds are averaged first, as the pipeline does with several first-stage model sets.
+
+A second set of classifiers reads, for each frame, those probabilities at offsets up to two
+seconds either side and in windows around it, and is cross-validated the same way, leave one
+match out. Its output feeds the same decoder. With --write the second-stage models and their
+decoder costs go into FOLDER.
 """
 
 import argparse
 import glob
 import itertools
+import json
 import os
 import sys
 
@@ -31,24 +35,28 @@ GRID = {
 }
 
 
-def load_run(folder):
+def load_runs(folders):
+    runs = []
+    for folder in folders:
+        runs.append({os.path.basename(p)[8:-4]: np.load(p)
+                     for p in sorted(glob.glob(os.path.join(folder, "heldout_*.npz")))})
     out = {}
-    for path in sorted(glob.glob(os.path.join(folder, "heldout_*.npz"))):
-        z = np.load(path)
-        name = os.path.basename(path)[8:-4]
-        out[name] = {"p": (z["p_dead"], z["p_home"], z["p_restart"]), "y": z["labels"],
-                     "next": learned.next_restarter(z["labels"]),
-                     "blocks": [tuple(int(v) for v in b) for b in z["blocks"]]}
+    for name in sorted(set.intersection(*[set(r) for r in runs])):
+        zs = [r[name] for r in runs]
+        p = tuple(learned.average([z[k] for z in zs]) for k in ("p_dead", "p_home", "p_restart"))
+        y = zs[0]["labels"]
+        out[name] = {"p": p, "y": y, "next": learned.next_restarter(y),
+                     "blocks": [tuple(int(v) for v in b) for b in zs[0]["blocks"]]}
     return out
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("run")
-    parser.add_argument("--write", action="store_true")
+    parser.add_argument("runs", nargs="+")
+    parser.add_argument("--write", metavar="FOLDER")
     args = parser.parse_args()
 
-    data = load_run(args.run)
+    data = load_runs(args.runs)
     matches = sorted(data)
     feats = {m: learned.stack_features(*data[m]["p"]) for m in matches}
     combos = [dict(zip(GRID, v)) for v in itertools.product(*GRID.values())]
@@ -73,12 +81,19 @@ def main():
         j = int(np.argmax(mean))
         print("stage {}: mean spellF1 {:.3f} macroF1 {:.3f} at {}".format(
             stage + 1, mean[j], table[:, j, stage, 1].mean(), combos[j]))
+        print("  per match " + " ".join("{:.3f}".format(v) for v in table[:, j, stage, 0]))
+    best = int(np.argmax(table[:, :, 1, 0].mean(axis=0)))
 
     if args.write:
         parts = [{"x": feats[m], "y": data[m]["y"], "next": data[m]["next"]} for m in matches]
         x, y = train.stack(parts)
-        learned.save({"stack_" + k: v for k, v in learned.fit(x, y).items()})
-        print("wrote second-stage models to", learned.MODEL_DIR)
+        learned.save({"stack_" + k: v for k, v in learned.fit(x, y).items()}, args.write)
+        with open(os.path.join(args.write, "stack.json"), "w") as handle:
+            json.dump({"decoder": dict(learned.DECODER, **combos[best]),
+                       "cv_spell_f1": float(table[:, best, 1, 0].mean()),
+                       "first_stage_runs": [os.path.basename(r.rstrip("/")) for r in args.runs]},
+                      handle, indent=1)
+        print("wrote second-stage models to", args.write)
 
 
 if __name__ == "__main__":
