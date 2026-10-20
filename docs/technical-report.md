@@ -1,6 +1,7 @@
 # Ball possession from automatic tracking
 
-More than a Hack 2027, Phase 1. Technical document.
+Daniel Tyukov, team Frame Control. More than a Hack 2027, Phase 1, technical document.\
+Code: https://github.com/danieltyukov/more-than-a-hack-2027
 
 ## Summary
 
