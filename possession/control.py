@@ -7,6 +7,7 @@ becoming a turnover.
 """
 
 import numpy as np
+from scipy.special import expit
 
 # Reach of a player, in metres. Ball and player positions each carry tracker error of a few tens
 # of centimetres, so the kernel is wider than a real foot.
@@ -25,5 +26,12 @@ def touch_kernel(d, reach=REACH):
 def evidence(f, reach=REACH, flight_speed=FLIGHT_SPEED):
     e = touch_kernel(f.d_home, reach) - touch_kernel(f.d_away, reach)
     speed = np.where(np.isfinite(f.ball_speed), f.ball_speed, 0.0)
-    weight = 1.0 / (1.0 + np.exp((speed - flight_speed) / 1.5))
+    weight = expit((flight_speed - speed) / 1.5)
     return np.where(f.ball_known, e * weight, 0.0)
+
+
+def restart_evidence(f, reach=2.0):
+    """Who is standing over the ball. Used only while the ball is dead, where nothing is in flight
+    and the nearest player is almost always the one about to take the restart."""
+    e = touch_kernel(f.d_home, reach) - touch_kernel(f.d_away, reach)
+    return np.where(f.ball_known, e, 0.0)

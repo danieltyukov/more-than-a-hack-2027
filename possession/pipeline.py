@@ -4,40 +4,45 @@ import numpy as np
 
 from games import GAME, half_video_blocks
 
-from . import atd, control, deadball, segment
+from . import atd, broadcast, control, deadball, segment
 from .features import Features
 
 DEFAULTS = {
     "touch_gain": 1.0,       # weight of one frame of touch evidence
     "switch_ha": 6.0,        # price of a turnover
     "switch_dead": 12.0,     # price of entering or leaving a stoppage
+    "dead_gain": 1.0,        # weight of the dead-ball log-odds
+    "restart_gain": 1.0,     # weight of "who is standing over the dead ball"
+    "switch_restarter": 4.0, # price of changing our mind about who restarts
 }
 
 
-def label(features, params=None, game=GAME):
+def label(features, params=None, shot=None, game=GAME):
     p = dict(DEFAULTS, **(params or {}))
     n = features.n
     e = control.evidence(features) * p["touch_gain"]
-    dead = deadball.score(features)
+    dead = deadball.score(features, shot) * p["dead_gain"]
 
-    score = np.zeros((n, 3))
-    score[:, segment.H] = e
-    score[:, segment.A] = -e
-    score[:, segment.D] = dead
+    r = control.restart_evidence(features) * p["restart_gain"]
 
-    cost = np.array([[0, p["switch_ha"], p["switch_dead"]],
-                     [p["switch_ha"], 0, p["switch_dead"]],
-                     [p["switch_dead"], p["switch_dead"], 0]])
+    score = np.zeros((n, 4))
+    score[:, segment.S_H] = e
+    score[:, segment.S_A] = -e
+    score[:, segment.S_DH] = dead + r
+    score[:, segment.S_DA] = dead - r
+    cost = segment.cost_matrix(p["switch_ha"], p["switch_dead"], p["switch_restarter"])
 
     out = np.full(n, "X", dtype="<U1")
     for _, first, last in half_video_blocks(game):
         path = segment.viterbi(score[first:last + 1], cost)
-        out[first:last + 1] = segment.LETTERS[path]
+        out[first:last + 1] = segment.LETTERS[segment.STATE_LABEL[path]]
     return out
 
 
-def run(params=None, game=GAME, data_dir=None):
-    return label(Features(atd.load(game, data_dir)), params, game)
+def run(params=None, game=GAME, data_dir=None, use_broadcast=True):
+    tracking = atd.load(game, data_dir)
+    shot = broadcast.Broadcast(tracking, game, data_dir).shot if use_broadcast else None
+    return label(Features(tracking), params, shot, game)
 
 
 def write_submission(path, labels):

@@ -4,6 +4,8 @@ Everything is a flat array over video frames so the later stages can stay vector
 in metres, speeds in m/s, and NaN means "not observable on this frame", never zero.
 """
 
+import warnings
+
 import numpy as np
 
 from .atd import AWAY, HOME
@@ -80,7 +82,8 @@ class Features:
         self.n_home = tracked[:, home].sum(axis=1)
         self.n_away = tracked[:, away].sum(axis=1)
 
-        with np.errstate(invalid="ignore"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)  # frames with nobody tracked
             speed = np.where(tracked, t.speed, np.nan)
             self.mean_speed = np.nanmean(speed, axis=1)
             self.mean_speed_home = np.nanmean(speed[:, home], axis=1)
